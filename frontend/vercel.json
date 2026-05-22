@@ -1,0 +1,7 @@
+{
+  "rewrites": [
+    { "source": "/graphql", "destination": "https://YOUR_RENDER_URL/graphql" },
+    { "source": "/stream", "destination": "https://YOUR_RENDER_URL/stream" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
