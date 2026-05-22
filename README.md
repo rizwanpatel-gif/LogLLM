@@ -4,6 +4,8 @@ A full-stack application that lets you chat with large language models and autom
 
 Live demo: https://logllm.vercel.app
 
+Architecture notes: [ARCHITECTURE.md](./ARCHITECTURE.md)
+
 ---
 
 ## What it does
