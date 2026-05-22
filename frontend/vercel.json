@@ -1,7 +1,7 @@
 {
   "rewrites": [
-    { "source": "/graphql", "destination": "https://YOUR_RENDER_URL/graphql" },
-    { "source": "/stream", "destination": "https://YOUR_RENDER_URL/stream" },
+    { "source": "/graphql", "destination": "https://logllm.onrender.com/graphql" },
+    { "source": "/stream", "destination": "https://logllm.onrender.com/stream" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
