@@ -17,7 +17,6 @@ async function main() {
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/logllm');
   console.log('MongoDB connected');
 
-  // BullMQ worker runs in the same process
   const worker = new Worker('inference-logs', async (job) => {
     const { conversationId, latencyMs, promptTokens, completionTokens, model, provider, status, requestedAt, inputPreview, outputPreview } = job.data;
     await InferenceLog.create({ conversationId, latencyMs, promptTokens, completionTokens, model, provider, status, requestedAt, inputPreview, outputPreview });
@@ -30,7 +29,6 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
-  // SSE streaming endpoint — supports provider selection + cancellation
   app.get('/stream', async (req, res) => {
     const { conversationId, content, provider = 'anthropic' } = req.query as {
       conversationId?: string;
@@ -48,7 +46,6 @@ async function main() {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    // AbortController lets client cancel mid-stream
     const abortController = new AbortController();
     req.on('close', () => abortController.abort());
 

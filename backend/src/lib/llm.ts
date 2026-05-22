@@ -16,7 +16,7 @@ export type Provider = 'anthropic' | 'gemini';
 
 export const PROVIDER_MODELS: Record<Provider, string> = {
   anthropic: 'claude-sonnet-4-6',
-  gemini: 'gemini-1.5-flash',
+  gemini: 'gemini-2.5-flash',
 };
 
 export interface ChatMessage {
@@ -49,7 +49,6 @@ export async function streamChat(
         messages: messages.map(m => ({ role: m.role, content: m.content })),
       });
 
-      // Abort anthropic stream when signal fires
       signal?.addEventListener('abort', () => stream.abort());
 
       for await (const chunk of stream) {
@@ -69,7 +68,6 @@ export async function streamChat(
     } else if (provider === 'gemini') {
       const geminiModel = gemini.getGenerativeModel({ model });
 
-      // Gemini uses 'model' role, not 'assistant'
       const history = messages.slice(0, -1).map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
@@ -95,9 +93,9 @@ export async function streamChat(
     }
   } catch (err: any) {
     if (signal?.aborted || err?.name === 'AbortError') {
-      // client cancelled — not an error, keep status success
     } else {
       status = 'error';
+      console.error(`[${provider}] error:`, err?.message ?? err);
       throw err;
     }
   } finally {

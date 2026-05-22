@@ -32,6 +32,7 @@ export default function ChatPage() {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+  const activeConvIdRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const apolloClient = useApolloClient();
 
@@ -57,7 +58,7 @@ export default function ChatPage() {
   const [deleteConversation] = useMutation(DELETE_CONVERSATION, {
     onCompleted: () => {
       refetchConvs();
-      setActiveConvId(null);
+      setConvId(null);
       setMessages([]);
     },
   });
@@ -70,8 +71,13 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  function setConvId(id: string | null) {
+    activeConvIdRef.current = id;
+    setActiveConvId(id);
+  }
+
   function startNewChat() {
-    setActiveConvId(null);
+    setConvId(null);
     setMessages([]);
     setInput('');
   }
@@ -99,7 +105,7 @@ export default function ChatPage() {
     ]);
 
     const params = new URLSearchParams({ content: userText, provider });
-    if (activeConvId) params.set('conversationId', activeConvId);
+    if (activeConvIdRef.current) params.set('conversationId', activeConvIdRef.current);
 
     const es = new EventSource(`/stream?${params.toString()}`);
     esRef.current = es;
@@ -107,7 +113,7 @@ export default function ChatPage() {
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'conversation') {
-        setActiveConvId(data.conversationId);
+        setConvId(data.conversationId);
         apolloClient.refetchQueries({ include: [GET_CONVERSATIONS] });
       } else if (data.type === 'token') {
         setMessages(prev =>
@@ -118,7 +124,7 @@ export default function ChatPage() {
         esRef.current = null;
         setStreaming(false);
       } else if (data.type === 'done') {
-        if (!activeConvId) setActiveConvId(data.conversationId);
+        if (!activeConvIdRef.current) setConvId(data.conversationId);
         apolloClient.refetchQueries({ include: [GET_CONVERSATIONS, GET_DASHBOARD_STATS] });
         es.close();
         esRef.current = null;
@@ -197,7 +203,7 @@ export default function ChatPage() {
               onMouseLeave={e => { if (activeConvId !== conv.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
             >
               <button
-                onClick={() => { setActiveConvId(conv.id); setMessages([]); closeSidebar(); }}
+                onClick={() => { setConvId(conv.id); setMessages([]); closeSidebar(); }}
                 style={{ flex: 1, textAlign: 'left', padding: '7px 8px', background: 'none', border: 'none', color: activeConvId === conv.id ? '#e2e2e2' : '#8a8a8a', fontSize: 13, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
                 {conv.title}
@@ -301,7 +307,7 @@ export default function ChatPage() {
             {(['anthropic', 'gemini'] as const).map(p => (
               <button
                 key={p}
-                onClick={() => setProvider(p)}
+                onClick={() => { if (p !== provider) { setProvider(p); startNewChat(); } }}
                 style={{
                   padding: '3px 10px', borderRadius: 4, border: '1px solid',
                   borderColor: provider === p ? '#5e6ad2' : '#2a2a2a',
