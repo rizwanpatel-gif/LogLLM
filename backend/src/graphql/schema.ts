@@ -17,6 +17,7 @@ export const typeDefs = `#graphql
     avgLatencyMs: Float!
     totalRequests: Int!
     errorRate: Float!
+    throughputPerMinute: Float!
   }
 
   type Query {

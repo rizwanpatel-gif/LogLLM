@@ -27,6 +27,7 @@ export const GET_DASHBOARD_STATS = gql`
       avgLatencyMs
       totalRequests
       errorRate
+      throughputPerMinute
     }
   }
 `;

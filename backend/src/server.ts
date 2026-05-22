@@ -6,7 +6,7 @@ import { ApolloServer } from '@apollo/server';
 import { expressMiddleware } from '@apollo/server/express4';
 import { typeDefs } from './graphql/schema';
 import { resolvers } from './graphql/resolvers';
-import { streamChat, ChatMessage } from './lib/llm';
+import { streamChat, ChatMessage, Provider } from './lib/llm';
 import Message from './models/Message';
 import { Worker } from 'bullmq';
 import { redisConnection } from './lib/redis';
@@ -17,11 +17,11 @@ async function main() {
   await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/logllm');
   console.log('MongoDB connected');
 
-  // BullMQ worker runs in the same process (saves a Render service slot)
+  // BullMQ worker runs in the same process
   const worker = new Worker('inference-logs', async (job) => {
     const { conversationId, latencyMs, promptTokens, completionTokens, model, provider, status, requestedAt, inputPreview, outputPreview } = job.data;
     await InferenceLog.create({ conversationId, latencyMs, promptTokens, completionTokens, model, provider, status, requestedAt, inputPreview, outputPreview });
-    console.log(`Logged [${status}] ${model} — ${latencyMs}ms`);
+    console.log(`Logged [${status}] ${provider}/${model} — ${latencyMs}ms`);
   }, { connection: redisConnection });
   worker.on('failed', (job, err) => console.error(`Job ${job?.id} failed:`, err.message));
   console.log('BullMQ worker started');
@@ -30,9 +30,13 @@ async function main() {
   app.use(cors());
   app.use(express.json());
 
-  // SSE streaming endpoint
+  // SSE streaming endpoint — supports provider selection + cancellation
   app.get('/stream', async (req, res) => {
-    const { conversationId, content } = req.query as { conversationId?: string; content?: string };
+    const { conversationId, content, provider = 'anthropic' } = req.query as {
+      conversationId?: string;
+      content?: string;
+      provider?: Provider;
+    };
 
     if (!content) {
       res.status(400).json({ error: 'content is required' });
@@ -44,6 +48,10 @@ async function main() {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
+    // AbortController lets client cancel mid-stream
+    const abortController = new AbortController();
+    req.on('close', () => abortController.abort());
+
     let convId = conversationId;
 
     if (!convId) {
@@ -52,24 +60,36 @@ async function main() {
       res.write(`data: ${JSON.stringify({ type: 'conversation', conversationId: convId })}\n\n`);
     }
 
-    // Save user message
     await Message.create({ conversationId: convId, role: 'user', content });
 
-    // Load conversation history
     const history = await Message.find({ conversationId: convId }).sort({ createdAt: 1 });
     const messages: ChatMessage[] = history.map(m => ({ role: m.role, content: m.content }));
 
     let fullResponse = '';
 
     try {
-      fullResponse = await streamChat(messages, convId, (token) => {
-        res.write(`data: ${JSON.stringify({ type: 'token', text: token })}\n\n`);
-      });
+      fullResponse = await streamChat(
+        messages,
+        convId,
+        provider,
+        (token) => {
+          if (!abortController.signal.aborted) {
+            res.write(`data: ${JSON.stringify({ type: 'token', text: token })}\n\n`);
+          }
+        },
+        abortController.signal
+      );
 
-      // Save assistant message
-      await Message.create({ conversationId: convId, role: 'assistant', content: fullResponse });
-
-      res.write(`data: ${JSON.stringify({ type: 'done', conversationId: convId })}\n\n`);
+      if (!abortController.signal.aborted) {
+        await Message.create({ conversationId: convId, role: 'assistant', content: fullResponse });
+        res.write(`data: ${JSON.stringify({ type: 'done', conversationId: convId })}\n\n`);
+      } else {
+        // Save partial response on cancel
+        if (fullResponse) {
+          await Message.create({ conversationId: convId, role: 'assistant', content: fullResponse + ' [cancelled]' });
+        }
+        res.write(`data: ${JSON.stringify({ type: 'cancelled' })}\n\n`);
+      }
     } catch (err) {
       res.write(`data: ${JSON.stringify({ type: 'error', message: 'Stream failed' })}\n\n`);
     } finally {
@@ -79,7 +99,6 @@ async function main() {
 
   const apollo = new ApolloServer({ typeDefs, resolvers });
   await apollo.start();
-
   app.use('/graphql', expressMiddleware(apollo));
 
   const PORT = process.env.PORT || 4000;

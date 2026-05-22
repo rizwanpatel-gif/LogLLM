@@ -17,6 +17,8 @@ export const resolvers = {
     dashboardStats: async () => {
       const total = await InferenceLog.countDocuments();
       const errors = await InferenceLog.countDocuments({ status: 'error' });
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const lastHourCount = await InferenceLog.countDocuments({ createdAt: { $gte: oneHourAgo } });
       const agg = await InferenceLog.aggregate([
         { $group: { _id: null, avg: { $avg: '$latencyMs' } } },
       ]);
@@ -24,6 +26,7 @@ export const resolvers = {
         avgLatencyMs: agg[0]?.avg ?? 0,
         totalRequests: total,
         errorRate: total > 0 ? (errors / total) * 100 : 0,
+        throughputPerMinute: parseFloat((lastHourCount / 60).toFixed(2)),
       };
     },
   },

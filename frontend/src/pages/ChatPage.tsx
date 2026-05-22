@@ -27,9 +27,11 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [provider, setProvider] = useState<'anthropic' | 'gemini'>('anthropic');
   const [showDashboard, setShowDashboard] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const esRef = useRef<EventSource | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const apolloClient = useApolloClient();
 
@@ -49,7 +51,7 @@ export default function ChatPage() {
     skip: !activeConvId || streaming,  // don't overwrite local state mid-stream
   });
   const { data: statsData } = useQuery<{
-    dashboardStats: { avgLatencyMs: number; totalRequests: number; errorRate: number };
+    dashboardStats: { avgLatencyMs: number; totalRequests: number; errorRate: number; throughputPerMinute: number };
   }>(GET_DASHBOARD_STATS, { pollInterval: 10000 });
 
   const [deleteConversation] = useMutation(DELETE_CONVERSATION, {
@@ -74,6 +76,12 @@ export default function ChatPage() {
     setInput('');
   }
 
+  function cancelStream() {
+    esRef.current?.close();
+    esRef.current = null;
+    setStreaming(false);
+  }
+
   async function sendMessage() {
     if (!input.trim() || streaming) return;
 
@@ -90,10 +98,11 @@ export default function ChatPage() {
       { id: assistantId, role: 'assistant' as const, content: '' },
     ]);
 
-    const params = new URLSearchParams({ content: userText });
+    const params = new URLSearchParams({ content: userText, provider });
     if (activeConvId) params.set('conversationId', activeConvId);
 
     const es = new EventSource(`/stream?${params.toString()}`);
+    esRef.current = es;
 
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
@@ -104,10 +113,15 @@ export default function ChatPage() {
         setMessages(prev =>
           prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + data.text } : m)
         );
+      } else if (data.type === 'cancelled') {
+        es.close();
+        esRef.current = null;
+        setStreaming(false);
       } else if (data.type === 'done') {
         if (!activeConvId) setActiveConvId(data.conversationId);
         apolloClient.refetchQueries({ include: [GET_CONVERSATIONS, GET_DASHBOARD_STATS] });
         es.close();
+        esRef.current = null;
         setStreaming(false);
       } else if (data.type === 'error') {
         es.close();
@@ -207,11 +221,8 @@ export default function ChatPage() {
           </p>
           <StatRow label="Avg latency" value={stats ? `${Math.round(stats.avgLatencyMs)}ms` : '—'} />
           <StatRow label="Total requests" value={stats ? String(stats.totalRequests) : '—'} />
-          <StatRow
-            label="Error rate"
-            value={stats ? `${stats.errorRate.toFixed(1)}%` : '—'}
-            warn={(stats?.errorRate ?? 0) > 5}
-          />
+          <StatRow label="Error rate" value={stats ? `${stats.errorRate.toFixed(1)}%` : '—'} warn={(stats?.errorRate ?? 0) > 5} />
+          <StatRow label="Throughput" value={stats ? `${stats.throughputPerMinute}/min` : '—'} />
         </div>
       </div>
 
@@ -285,6 +296,26 @@ export default function ChatPage() {
 
         {/* Input */}
         <div style={{ padding: isMobile ? '0 12px 16px' : '0 28px 20px', flexShrink: 0 }}>
+          {/* Provider selector */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            {(['anthropic', 'gemini'] as const).map(p => (
+              <button
+                key={p}
+                onClick={() => setProvider(p)}
+                style={{
+                  padding: '3px 10px', borderRadius: 4, border: '1px solid',
+                  borderColor: provider === p ? '#5e6ad2' : '#2a2a2a',
+                  background: provider === p ? 'rgba(94,106,210,0.15)' : 'transparent',
+                  color: provider === p ? '#5e6ad2' : '#555',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {p === 'anthropic' ? 'Claude' : 'Gemini'}
+              </button>
+            ))}
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, border: '1px solid #2a2a2a', borderRadius: 10, background: '#161616', padding: '12px 16px' }}>
             <textarea
               rows={1}
@@ -295,13 +326,22 @@ export default function ChatPage() {
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
               disabled={streaming}
             />
-            <button
-              onClick={sendMessage}
-              disabled={streaming || !input.trim()}
-              style={{ flexShrink: 0, padding: '6px 16px', background: streaming || !input.trim() ? '#2a2a2a' : '#5e6ad2', border: 'none', borderRadius: 6, color: streaming || !input.trim() ? '#555' : '#fff', fontSize: 13, fontWeight: 600, cursor: streaming || !input.trim() ? 'not-allowed' : 'pointer' }}
-            >
-              {streaming ? '...' : 'Send'}
-            </button>
+            {streaming ? (
+              <button
+                onClick={cancelStream}
+                style={{ flexShrink: 0, padding: '6px 16px', background: '#3a1a1a', border: '1px solid #e06c75', borderRadius: 6, color: '#e06c75', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={sendMessage}
+                disabled={!input.trim()}
+                style={{ flexShrink: 0, padding: '6px 16px', background: !input.trim() ? '#2a2a2a' : '#5e6ad2', border: 'none', borderRadius: 6, color: !input.trim() ? '#555' : '#fff', fontSize: 13, fontWeight: 600, cursor: !input.trim() ? 'not-allowed' : 'pointer' }}
+              >
+                Send
+              </button>
+            )}
           </div>
           <p style={{ marginTop: 6, fontSize: 11, color: '#2e2e2e' }}>Enter to send · Shift+Enter for newline</p>
         </div>
@@ -362,10 +402,11 @@ function DashboardModal({
         </div>
 
         {/* Stat cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 1, background: '#1e1e1e', border: '1px solid #1e1e1e', borderRadius: 8, marginBottom: 20, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 1, background: '#1e1e1e', border: '1px solid #1e1e1e', borderRadius: 8, marginBottom: 20, overflow: 'hidden' }}>
           <ModalStatCard label="Avg latency" value={`${Math.round(stats?.avgLatencyMs ?? 0)}ms`} />
           <ModalStatCard label="Total requests" value={String(total)} />
           <ModalStatCard label="Error rate" value={`${(stats?.errorRate ?? 0).toFixed(1)}%`} warn={(stats?.errorRate ?? 0) > 5} />
+          <ModalStatCard label="Throughput" value={`${stats?.throughputPerMinute ?? 0}/min`} />
         </div>
 
         {/* Charts */}

@@ -12,6 +12,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@apollo/server": "^4.11.0",
+    "@google/generative-ai": "^0.21.0",
     "bullmq": "^5.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
