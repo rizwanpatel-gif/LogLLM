@@ -370,7 +370,7 @@ function DashboardModal({
   stats,
   onClose,
 }: {
-  stats: { avgLatencyMs: number; totalRequests: number; errorRate: number } | undefined;
+  stats: { avgLatencyMs: number; totalRequests: number; errorRate: number; throughputPerMinute: number } | undefined;
   onClose: () => void;
 }) {
   const total = stats?.totalRequests ?? 0;
